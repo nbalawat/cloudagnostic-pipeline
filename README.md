@@ -1,246 +1,211 @@
 # Cloud-Agnostic Data Pipeline Framework
 
-A comprehensive, cloud-agnostic data processing framework supporting multiple storage formats, quality checks, and advanced orchestration capabilities.
-
-## Table of Contents
-- [Features](#features)
-- [Architecture](#architecture)
-- [Module Overview](#module-overview)
-- [Local Development Setup](#local-development-setup)
-- [Configuration](#configuration)
-- [Usage Examples](#usage-examples)
-- [Monitoring & Metrics](#monitoring--metrics)
-- [Contributing](#contributing)
+A robust, extensible framework for building and running data pipelines across multiple cloud providers.
 
 ## Features
 
-### Core Capabilities
-- Multi-cloud support (AWS, Azure, GCP)
-- Multiple storage formats (Parquet, JSON, CSV, ORC)
-- Delta Lake, Apache Iceberg, Apache Hudi support
-- Medallion architecture (Bronze, Silver, Gold)
-- Advanced quality framework
-- Event-driven processing
-- Comprehensive monitoring
+- **Cloud Provider Support**
+  - AWS (Amazon Web Services)
+  - GCP (Google Cloud Platform)
+  - Azure (Microsoft Azure)
 
-### Data Processing
-- Configurable transformations
-- Schema evolution
-- Data validation
-- Error handling
-- Audit logging
-- Metadata management
+- **Core Components**
+  - Storage Management
+  - Pipeline Orchestration
+  - Monitoring & Alerting
+  - Data Encryption
 
-### Quality Framework
-- Rule-based validation
-- Anomaly detection
-- Pattern matching
-- Threshold management
-- Quality metrics tracking
-
-### Security
-- Column-level encryption
-- Role-based access control
-- Audit logging
-- Secure configuration
-- Key management
+- **Key Capabilities**
+  - Database-driven configuration
+  - Dynamic DAG generation
+  - Quality rule enforcement
+  - Error recovery
+  - Version control
+  - Migration management
 
 ## Architecture
 
-### Core Components
-1. **API Layer**
-   - FastAPI-based REST API
-   - Configuration management
-   - Pipeline control
-   - Status monitoring
+### Provider Abstraction
+- Abstract base classes define interfaces for:
+  - Storage operations
+  - Job orchestration
+  - Monitoring & metrics
+  - Encryption & security
 
-2. **Processing Engine**
-   - Spark-based processing
-   - Multiple format support
-   - Transformation framework
-   - Quality checks
+### Database Schema
+- Pipeline configurations
+- Layer mappings
+- Quality rules
+- Execution tracking
+- Error management
 
-3. **Orchestration**
-   - Argo Workflows
-   - DAG management
-   - Event triggers
-   - Error handling
+### Service Layer
+- Pipeline execution
+- Data management
+- Monitoring integration
+- Security implementation
 
-4. **Monitoring**
-   - Metrics collection
-   - Alert management
-   - Dashboard integration
-   - Performance tracking
+## Installation
 
-## Module Overview
-
-### src/api/
-- `main.py`: FastAPI application entry point
-- `models/`: Database models and schemas
-- `crud/`: Database operations
-- `routes/`: API endpoints
-
-### src/processor/
-- `data_processor.py`: Core processing logic
-- `transformers/`: Data transformation modules
-- `validators/`: Data validation rules
-- `utils/`: Helper functions
-
-### src/quality/
-- `rule_engine.py`: Quality rule processing
-- `anomaly_detection.py`: Anomaly detection system
-- `metrics/`: Quality metrics collection
-- `validators/`: Quality validation rules
-
-### src/workflow/
-- `dag_generator.py`: DAG generation logic
-- `run_pipeline.py`: Pipeline execution
-- `error_handler.py`: Error management
-- `status_tracker.py`: Pipeline status tracking
-
-### src/messaging/
-- `event_publisher.py`: Kafka event publishing
-- `consumers/`: Event consumers
-- `handlers/`: Event handling logic
-
-### src/security/
-- `encryption.py`: Data encryption
-- `key_manager.py`: Key management
-- `rbac/`: Access control
-
-## Local Development Setup
-
-### Prerequisites
 ```bash
-# Install Homebrew if not already installed
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install required tools
-brew install python@3.9
-brew install apache-spark
-brew install kafka
-brew install postgresql
-brew install kubectl
-brew install helm
-brew install k9s  # Optional, for K8s management
-```
-
-### Environment Setup
-```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/yourusername/cloud-agnostic-pipeline.git
 cd cloud-agnostic-pipeline
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Linux/Mac
+.\venv\Scripts\activate   # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### Start Local Services
-```bash
-# Start Docker services
-docker-compose up -d
+## Configuration
 
-# Verify services are running
-docker-compose ps
+Create a `config.yaml` file:
 
-# Initialize database
-python src/api/init_db.py
-
-# Generate sample data
-python tests/data_generators/sample_data_generator.py
+```yaml
+cloud_provider: aws  # or 'gcp' or 'azure'
+storage:
+  bucket: my-pipeline-data
+orchestrator:
+  job_queue: pipeline-queue
+  job_definition: pipeline-job-def
+monitoring:
+  namespace: MyPipeline
+encryption:
+  key_id: alias/pipeline-key
 ```
 
-### Start Development Server
-```bash
-# Start API server
-uvicorn src.api.main:app --reload --port 8000
+## Usage
 
-# In another terminal, start the pipeline
-python src/workflow/run_pipeline.py
+### Basic Pipeline Execution
+
+```python
+from src.services.pipeline_service import PipelineService
+
+# Initialize service
+with open('config.yaml') as f:
+    config = yaml.safe_load(f)
+pipeline_service = PipelineService(config)
+
+# Execute pipeline
+job_id = await pipeline_service.execute_pipeline({
+    'id': 'pipeline-001',
+    'steps': [
+        {
+            'name': 'extract',
+            'type': 'source',
+            'config': {...}
+        },
+        {
+            'name': 'transform',
+            'type': 'sql',
+            'config': {...}
+        }
+    ]
+})
+
+# Check status
+status = await pipeline_service.get_pipeline_status(job_id)
 ```
 
-### Run Tests
+### Quality Rules
+
+```python
+# Define quality rule
+quality_rule = {
+    'name': 'null_check',
+    'columns': ['id', 'name'],
+    'condition': 'IS NOT NULL',
+    'threshold': 0.99
+}
+
+# Apply to pipeline
+pipeline_config = {
+    'id': 'pipeline-001',
+    'quality_rules': [quality_rule],
+    'steps': [...]
+}
+```
+
+## Development
+
+### Setting Up Development Environment
+
 ```bash
-# Run unit tests
-pytest tests/unit
+# Install development dependencies
+pip install -r requirements-dev.txt
 
-# Run integration tests
-pytest tests/integration
+# Run tests
+pytest
 
-# Generate test coverage report
+# Run linting
+flake8 src tests
+```
+
+### Adding a New Cloud Provider
+
+1. Create provider implementation:
+```python
+from src.providers.base import StorageProvider
+
+class NewStorageProvider(StorageProvider):
+    async def read_file(self, path: str) -> bytes:
+        # Implementation
+        pass
+```
+
+2. Register in factory:
+```python
+class ProviderFactory:
+    _storage_providers = {
+        'new_provider': NewStorageProvider
+    }
+```
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test category
+pytest tests/test_providers/
+pytest tests/test_services/
+
+# Run with coverage
 pytest --cov=src tests/
 ```
 
-## Configuration
-
-### Environment Variables
-```bash
-# Create .env file
-cp .env.example .env
-
-# Edit variables
-POSTGRES_HOST=localhost
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-SPARK_MASTER_URL=local[*]
-```
-
-### Pipeline Configuration
-```yaml
-# Edit src/config/pipeline_config.yaml
-source_systems:
-  - name: sales_data
-    type: csv
-    path: /data/landing/sales
-  - name: customer_data
-    type: parquet
-    path: /data/landing/customers
-```
-
-## Usage Examples
-
-### Run Simple Pipeline
-```bash
-# Using CLI
-python src/cli/pipeline.py run --config config/simple_pipeline.yaml
-
-# Using API
-curl -X POST http://localhost:8000/api/v1/pipelines/run \
-  -H "Content-Type: application/json" \
-  -d '{"config_path": "config/simple_pipeline.yaml"}'
-```
-
-### Monitor Pipeline
-```bash
-# View pipeline status
-curl http://localhost:8000/api/v1/pipelines/status/{pipeline_id}
-
-# View quality metrics
-curl http://localhost:8000/api/v1/quality/metrics/{pipeline_id}
-```
-
-## Monitoring & Metrics
-
-### Available Metrics
-- Pipeline execution time
-- Record counts by layer
-- Quality scores
-- Error rates
-- Resource utilization
-
-### Dashboards
-- Grafana dashboards available in `monitoring/dashboards/`
-- Prometheus configurations in `monitoring/prometheus/`
-
 ## Contributing
+
 1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open Pull Request
 
 ## License
-MIT License - see LICENSE file for details
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Project Structure
+
+```
+cloud-agnostic-pipeline/
+├── src/
+│   ├── api/              # API endpoints
+│   ├── db/              # Database models and migrations
+│   ├── providers/       # Cloud provider implementations
+│   ├── services/        # Business logic
+│   └── workflow/        # Pipeline execution
+├── tests/
+│   ├── providers/       # Provider tests
+│   ├── services/        # Service tests
+│   └── workflow/        # Workflow tests
+├── config/             # Configuration templates
+└── docs/              # Documentation
