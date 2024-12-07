@@ -1,0 +1,110 @@
+{
+    "rule_id": "customer_silver_quality",
+    "version": "1.0.0",
+    "rules": {
+        "completeness": {
+            "type": "completeness",
+            "columns": [
+                "customer_id",
+                "first_name",
+                "last_name",
+                "full_name",
+                "email",
+                "address",
+                "city",
+                "state",
+                "zip_code",
+                "country",
+                "latitude",
+                "longitude",
+                "timezone",
+                "registration_date",
+                "update_date"
+            ],
+            "threshold": 1.0,
+            "severity": "high"
+        },
+        "uniqueness": {
+            "type": "uniqueness",
+            "columns": [
+                ["customer_id"],
+                ["email"]
+            ],
+            "threshold": 1.0,
+            "severity": "high"
+        },
+        "numeric": {
+            "type": "numeric",
+            "rules": [
+                {
+                    "column": "latitude",
+                    "min_value": -90,
+                    "max_value": 90
+                },
+                {
+                    "column": "longitude",
+                    "min_value": -180,
+                    "max_value": 180
+                }
+            ],
+            "threshold": 1.0,
+            "severity": "high"
+        },
+        "referential_integrity": {
+            "type": "referential_integrity",
+            "rules": [
+                {
+                    "source_table": "silver_customers",
+                    "target_table": "reference.valid_states",
+                    "source_columns": ["state", "country"],
+                    "target_columns": ["state_code", "country_code"],
+                    "threshold": 1.0
+                },
+                {
+                    "source_table": "silver_customers",
+                    "target_table": "reference.valid_zip_codes",
+                    "source_columns": ["zip_code", "state"],
+                    "target_columns": ["zip_code", "state_code"],
+                    "threshold": 0.99
+                }
+            ],
+            "severity": "high"
+        },
+        "anomaly": {
+            "type": "anomaly",
+            "rules": [
+                {
+                    "type": "group_pattern",
+                    "config": {
+                        "detection_method": "isolation_forest",
+                        "group_columns": ["country", "state"],
+                        "feature_columns": ["latitude", "longitude"],
+                        "lookback_window": 30,
+                        "threshold": 0.95,
+                        "min_samples": 1000
+                    }
+                },
+                {
+                    "type": "quality_failure",
+                    "config": {
+                        "detection_method": "zscore",
+                        "lookback_window": 7,
+                        "threshold": 2.0
+                    }
+                }
+            ],
+            "severity": "high"
+        }
+    },
+    "actions": {
+        "on_failure": {
+            "high": "quarantine",
+            "medium": "alert",
+            "low": "log"
+        },
+        "notification": {
+            "channels": ["email", "slack"],
+            "recipients": ["data_quality_team"]
+        }
+    }
+}

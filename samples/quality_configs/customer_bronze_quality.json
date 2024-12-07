@@ -1,0 +1,78 @@
+{
+    "rule_id": "customer_bronze_quality",
+    "version": "1.0.0",
+    "rules": {
+        "completeness": {
+            "type": "completeness",
+            "columns": [
+                "customer_id",
+                "first_name",
+                "last_name",
+                "email",
+                "address",
+                "city",
+                "state",
+                "zip_code",
+                "country",
+                "registration_date"
+            ],
+            "threshold": 0.99,
+            "severity": "high"
+        },
+        "uniqueness": {
+            "type": "uniqueness",
+            "columns": [
+                ["customer_id"],
+                ["email"]
+            ],
+            "threshold": 1.0,
+            "severity": "high"
+        },
+        "numeric": {
+            "type": "numeric",
+            "rules": [
+                {
+                    "column": "age",
+                    "min_value": 18,
+                    "max_value": 120
+                }
+            ],
+            "threshold": 1.0,
+            "severity": "medium"
+        },
+        "anomaly": {
+            "type": "anomaly",
+            "rules": [
+                {
+                    "type": "volume",
+                    "config": {
+                        "detection_method": "zscore",
+                        "lookback_window": 30,
+                        "threshold": 3.0,
+                        "min_samples": 1000
+                    }
+                },
+                {
+                    "type": "processing_time",
+                    "config": {
+                        "detection_method": "moving_average",
+                        "lookback_window": 7,
+                        "threshold": 2.0
+                    }
+                }
+            ],
+            "severity": "high"
+        }
+    },
+    "actions": {
+        "on_failure": {
+            "high": "quarantine",
+            "medium": "alert",
+            "low": "log"
+        },
+        "notification": {
+            "channels": ["email", "slack"],
+            "recipients": ["data_quality_team"]
+        }
+    }
+}

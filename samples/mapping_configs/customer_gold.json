@@ -1,0 +1,153 @@
+{
+    "mapping_id": "customer_gold_mapping",
+    "version": "1.0.0",
+    "status": "active",
+    "mapping_definition": {
+        "source_tables": [
+            {
+                "name": "customers",
+                "path": "s3://silver/customers/"
+            },
+            {
+                "name": "transactions",
+                "path": "s3://silver/transactions/"
+            }
+        ],
+        "joins": [
+            {
+                "type": "left",
+                "tables": ["customers", "transactions"],
+                "condition": "customers.customer_id = transactions.customer_id"
+            }
+        ],
+        "aggregations": [
+            {
+                "name": "customer_metrics",
+                "group_by": [
+                    "customers.customer_id",
+                    "customers.country",
+                    "date_trunc('month', transactions.transaction_date) as month"
+                ],
+                "metrics": [
+                    {
+                        "name": "total_spend",
+                        "expression": "sum(case when transactions.type = 'DEBIT' then transactions.amount else 0 end)",
+                        "type": "decimal(18,2)"
+                    },
+                    {
+                        "name": "total_income",
+                        "expression": "sum(case when transactions.type = 'CREDIT' then transactions.amount else 0 end)",
+                        "type": "decimal(18,2)"
+                    },
+                    {
+                        "name": "transaction_count",
+                        "expression": "count(*)",
+                        "type": "integer"
+                    },
+                    {
+                        "name": "average_transaction",
+                        "expression": "avg(transactions.amount)",
+                        "type": "decimal(18,2)"
+                    }
+                ],
+                "windows": [
+                    {
+                        "name": "rolling_metrics",
+                        "partition_by": ["customers.customer_id"],
+                        "order_by": "month",
+                        "frame": "rows between 2 preceding and current row",
+                        "metrics": [
+                            {
+                                "name": "spend_growth",
+                                "expression": "total_spend - lag(total_spend, 1) over (partition by customers.customer_id order by month)",
+                                "type": "decimal(18,2)"
+                            },
+                            {
+                                "name": "transaction_growth",
+                                "expression": "transaction_count - lag(transaction_count, 1) over (partition by customers.customer_id order by month)",
+                                "type": "integer"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "name": "customer_segments",
+                "dependencies": ["customer_metrics"],
+                "expression": "
+                    select 
+                        customer_id,
+                        case 
+                            when avg(total_spend) over w > 10000 and 
+                                 avg(transaction_count) over w > 20 then 'PREMIUM'
+                            when avg(total_spend) over w > 5000 and 
+                                 avg(transaction_count) over w > 10 then 'GOLD'
+                            else 'STANDARD'
+                        end as segment,
+                        avg(total_spend) over w as avg_monthly_spend,
+                        avg(transaction_count) over w as avg_monthly_transactions
+                    from customer_metrics
+                    window w as (
+                        partition by customer_id 
+                        order by month 
+                        rows between 5 preceding and current row
+                    )",
+                "type": "view"
+            }
+        ],
+        "target_fields": {
+            "customer_id": {
+                "source": "customer_metrics.customer_id",
+                "type": "string"
+            },
+            "country": {
+                "source": "customer_metrics.country",
+                "type": "string"
+            },
+            "report_month": {
+                "source": "customer_metrics.month",
+                "type": "date"
+            },
+            "total_spend": {
+                "source": "customer_metrics.total_spend",
+                "type": "decimal(18,2)"
+            },
+            "total_income": {
+                "source": "customer_metrics.total_income",
+                "type": "decimal(18,2)"
+            },
+            "transaction_count": {
+                "source": "customer_metrics.transaction_count",
+                "type": "integer"
+            },
+            "average_transaction": {
+                "source": "customer_metrics.average_transaction",
+                "type": "decimal(18,2)"
+            },
+            "spend_growth": {
+                "source": "customer_metrics.spend_growth",
+                "type": "decimal(18,2)"
+            },
+            "transaction_growth": {
+                "source": "customer_metrics.transaction_growth",
+                "type": "integer"
+            },
+            "customer_segment": {
+                "source": "customer_segments.segment",
+                "type": "string"
+            },
+            "avg_monthly_spend": {
+                "source": "customer_segments.avg_monthly_spend",
+                "type": "decimal(18,2)"
+            },
+            "avg_monthly_transactions": {
+                "source": "customer_segments.avg_monthly_transactions",
+                "type": "integer"
+            },
+            "report_date": {
+                "type": "date",
+                "transform": "current_date"
+            }
+        }
+    }
+}

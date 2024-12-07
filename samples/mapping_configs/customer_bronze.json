@@ -1,0 +1,155 @@
+{
+    "mapping_id": "customer_bronze_mapping",
+    "version": "1.0.0",
+    "status": "active",
+    "mapping_definition": {
+        "source_fields": {
+            "CustomerID": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "pattern": "^C[0-9]{10}$",
+                    "on_error": "reject"
+                }
+            },
+            "FirstName": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "max_length": 50,
+                    "on_error": "truncate"
+                }
+            },
+            "LastName": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "max_length": 50,
+                    "on_error": "truncate"
+                }
+            },
+            "Email": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "pattern": "^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$",
+                    "on_error": "quarantine"
+                }
+            },
+            "Phone": {
+                "type": "string",
+                "required": false,
+                "validation": {
+                    "pattern": "^\\+?[1-9][0-9]{7,14}$",
+                    "on_error": "null"
+                }
+            },
+            "Address": {
+                "type": "string",
+                "required": true
+            },
+            "City": {
+                "type": "string",
+                "required": true
+            },
+            "State": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "length": 2,
+                    "case": "upper"
+                }
+            },
+            "ZipCode": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+                    "on_error": "quarantine"
+                }
+            },
+            "Country": {
+                "type": "string",
+                "required": true,
+                "validation": {
+                    "length": 2,
+                    "case": "upper"
+                }
+            },
+            "RegistrationDate": {
+                "type": "timestamp",
+                "required": true,
+                "validation": {
+                    "format": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+                    "timezone": "UTC"
+                }
+            }
+        },
+        "target_fields": {
+            "customer_id": {
+                "source": "CustomerID",
+                "type": "string"
+            },
+            "first_name": {
+                "source": "FirstName",
+                "type": "string",
+                "transform": "trim"
+            },
+            "last_name": {
+                "source": "LastName",
+                "type": "string",
+                "transform": "trim"
+            },
+            "email": {
+                "source": "Email",
+                "type": "string",
+                "transform": "lower"
+            },
+            "phone": {
+                "source": "Phone",
+                "type": "string",
+                "transform": "clean_phone"
+            },
+            "address": {
+                "source": "Address",
+                "type": "string",
+                "transform": "clean_address"
+            },
+            "city": {
+                "source": "City",
+                "type": "string",
+                "transform": "proper_case"
+            },
+            "state": {
+                "source": "State",
+                "type": "string",
+                "transform": "upper"
+            },
+            "zip_code": {
+                "source": "ZipCode",
+                "type": "string"
+            },
+            "country": {
+                "source": "Country",
+                "type": "string",
+                "transform": "upper"
+            },
+            "registration_date": {
+                "source": "RegistrationDate",
+                "type": "timestamp"
+            },
+            "ingestion_timestamp": {
+                "type": "timestamp",
+                "transform": "current_timestamp"
+            },
+            "source_file": {
+                "type": "string",
+                "transform": "input_file_name"
+            },
+            "batch_id": {
+                "type": "string",
+                "transform": "uuid4"
+            }
+        }
+    }
+}

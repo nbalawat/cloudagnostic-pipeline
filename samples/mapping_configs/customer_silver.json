@@ -1,0 +1,179 @@
+{
+    "mapping_id": "customer_silver_mapping",
+    "version": "1.0.0",
+    "status": "active",
+    "mapping_definition": {
+        "source_fields": {
+            "customer_id": {
+                "type": "string",
+                "required": true
+            },
+            "first_name": {
+                "type": "string",
+                "required": true
+            },
+            "last_name": {
+                "type": "string",
+                "required": true
+            },
+            "email": {
+                "type": "string",
+                "required": true
+            },
+            "phone": {
+                "type": "string",
+                "required": false
+            },
+            "address": {
+                "type": "string",
+                "required": true
+            },
+            "city": {
+                "type": "string",
+                "required": true
+            },
+            "state": {
+                "type": "string",
+                "required": true
+            },
+            "zip_code": {
+                "type": "string",
+                "required": true
+            },
+            "country": {
+                "type": "string",
+                "required": true
+            },
+            "registration_date": {
+                "type": "timestamp",
+                "required": true
+            }
+        },
+        "transformations": [
+            {
+                "type": "standardize_name",
+                "config": {
+                    "input_columns": ["first_name", "last_name"],
+                    "operations": [
+                        "remove_special_chars",
+                        "proper_case",
+                        "trim"
+                    ]
+                }
+            },
+            {
+                "type": "standardize_address",
+                "config": {
+                    "address_column": "address",
+                    "city_column": "city",
+                    "state_column": "state",
+                    "zip_column": "zip_code",
+                    "country_column": "country",
+                    "reference_data": "s3://reference-data/address/",
+                    "operations": [
+                        "validate_city_state",
+                        "standardize_zip",
+                        "validate_address"
+                    ]
+                }
+            },
+            {
+                "type": "enrich_location",
+                "config": {
+                    "input_columns": {
+                        "zip": "zip_code",
+                        "country": "country"
+                    },
+                    "output_columns": {
+                        "latitude": "lat",
+                        "longitude": "long",
+                        "timezone": "timezone"
+                    },
+                    "reference_data": "s3://reference-data/geo/"
+                }
+            },
+            {
+                "type": "validate_contact",
+                "config": {
+                    "email_column": "email",
+                    "phone_column": "phone",
+                    "operations": [
+                        "validate_email_format",
+                        "validate_email_domain",
+                        "standardize_phone"
+                    ]
+                }
+            }
+        ],
+        "target_fields": {
+            "customer_id": {
+                "source": "customer_id",
+                "type": "string"
+            },
+            "first_name": {
+                "source": "first_name",
+                "type": "string"
+            },
+            "last_name": {
+                "source": "last_name",
+                "type": "string"
+            },
+            "full_name": {
+                "type": "string",
+                "transform": "concat",
+                "params": {
+                    "columns": ["first_name", "last_name"],
+                    "separator": " "
+                }
+            },
+            "email": {
+                "source": "email",
+                "type": "string"
+            },
+            "phone": {
+                "source": "phone",
+                "type": "string"
+            },
+            "address": {
+                "source": "address",
+                "type": "string"
+            },
+            "city": {
+                "source": "city",
+                "type": "string"
+            },
+            "state": {
+                "source": "state",
+                "type": "string"
+            },
+            "zip_code": {
+                "source": "zip_code",
+                "type": "string"
+            },
+            "country": {
+                "source": "country",
+                "type": "string"
+            },
+            "latitude": {
+                "source": "lat",
+                "type": "double"
+            },
+            "longitude": {
+                "source": "long",
+                "type": "double"
+            },
+            "timezone": {
+                "source": "timezone",
+                "type": "string"
+            },
+            "registration_date": {
+                "source": "registration_date",
+                "type": "timestamp"
+            },
+            "update_date": {
+                "type": "date",
+                "transform": "current_date"
+            }
+        }
+    }
+}

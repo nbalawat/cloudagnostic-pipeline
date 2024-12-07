@@ -1,0 +1,50 @@
+{
+    "pipeline_name": "customer_data_pipeline",
+    "status": "active",
+    "config_json": {
+        "description": "Customer data processing pipeline with bronze to gold transformations",
+        "schedule": "0 */4 * * *",
+        "owner": "data_team",
+        "layers": {
+            "bronze": {
+                "source": {
+                    "type": "file",
+                    "format": "csv",
+                    "path": "s3://landing/customers/",
+                    "pattern": "customer_*.csv"
+                },
+                "target": {
+                    "type": "delta",
+                    "path": "s3://bronze/customers/",
+                    "partition_by": ["ingestion_date"]
+                },
+                "schema_validation": {
+                    "mode": "strict",
+                    "on_error": "quarantine"
+                }
+            },
+            "silver": {
+                "source": {
+                    "type": "delta",
+                    "path": "s3://bronze/customers/"
+                },
+                "target": {
+                    "type": "delta",
+                    "path": "s3://silver/customers/",
+                    "partition_by": ["country", "update_date"]
+                }
+            },
+            "gold": {
+                "source": {
+                    "type": "delta",
+                    "path": "s3://silver/customers/"
+                },
+                "target": {
+                    "type": "delta",
+                    "path": "s3://gold/customer_metrics/",
+                    "partition_by": ["report_date", "country"]
+                }
+            }
+        }
+    }
+}
