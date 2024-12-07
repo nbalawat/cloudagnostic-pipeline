@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: data-pipeline
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - rbac.yaml
+  - deployments.yaml
+  - storage.yaml
+
+commonLabels:
+  app.kubernetes.io/name: data-pipeline
+  app.kubernetes.io/instance: prod
+  app.kubernetes.io/part-of: data-platform
+
+configMapGenerator:
+  - name: pipeline-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=production
+
+images:
+  - name: pipeline-api
+    newName: your-registry/pipeline-api
+    newTag: latest
+  - name: bitnami/spark
+    newTag: 3.3.0

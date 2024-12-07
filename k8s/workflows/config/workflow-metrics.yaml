@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-metrics
+  namespace: data-pipeline
+data:
+  metrics-config.yaml: |
+    enabled: true
+    path: /metrics
+    port: 9090
+    ttl: 24h
+    
+    metrics:
+      # Workflow-level metrics
+      - name: workflow_duration_seconds
+        help: "Duration of workflow execution"
+        type: Gauge
+        labels: ["workflow", "status"]
+      
+      - name: workflow_task_duration_seconds
+        help: "Duration of individual task execution"
+        type: Histogram
+        labels: ["workflow", "task", "status"]
+        buckets: [10, 30, 60, 120, 300, 600]
+      
+      # Quality metrics
+      - name: quality_check_score
+        help: "Quality check scores by layer"
+        type: Gauge
+        labels: ["workflow", "layer", "check_type"]
+      
+      - name: quality_check_failures
+        help: "Number of quality check failures"
+        type: Counter
+        labels: ["workflow", "layer", "check_type"]
+      
+      # Processing metrics
+      - name: records_processed
+        help: "Number of records processed"
+        type: Counter
+        labels: ["workflow", "layer", "status"]
+      
+      - name: processing_errors
+        help: "Number of processing errors"
+        type: Counter
+        labels: ["workflow", "layer", "error_type"]
+      
+      # Resource utilization
+      - name: memory_usage_bytes
+        help: "Memory usage of workflow tasks"
+        type: Gauge
+        labels: ["workflow", "task"]
+      
+      - name: cpu_usage_seconds
+        help: "CPU usage of workflow tasks"
+        type: Gauge
+        labels: ["workflow", "task"]

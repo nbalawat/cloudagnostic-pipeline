@@ -1,0 +1,159 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: data-pipeline-template
+  namespace: data-pipeline
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: validate-config
+            template: validate-config
+          - name: ingest-data
+            dependencies: [validate-config]
+            template: ingest-data
+          - name: quality-check-bronze
+            dependencies: [ingest-data]
+            template: quality-check
+            arguments:
+              parameters:
+                - name: layer
+                  value: bronze
+          - name: transform-silver
+            dependencies: [quality-check-bronze]
+            template: transform-data
+            arguments:
+              parameters:
+                - name: source-layer
+                  value: bronze
+                - name: target-layer
+                  value: silver
+          - name: quality-check-silver
+            dependencies: [transform-silver]
+            template: quality-check
+            arguments:
+              parameters:
+                - name: layer
+                  value: silver
+          - name: transform-gold
+            dependencies: [quality-check-silver]
+            template: transform-data
+            arguments:
+              parameters:
+                - name: source-layer
+                  value: silver
+                - name: target-layer
+                  value: gold
+          - name: quality-check-gold
+            dependencies: [transform-gold]
+            template: quality-check
+            arguments:
+              parameters:
+                - name: layer
+                  value: gold
+          - name: publish-metrics
+            dependencies: [quality-check-gold]
+            template: publish-metrics
+
+    - name: validate-config
+      container:
+        image: "{{workflow.parameters.pipeline-image}}"
+        command: [python]
+        args: ["-m", "src.workflow.config_validator"]
+        env:
+          - name: CONFIG_PATH
+            value: "{{workflow.parameters.config-path}}"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+
+    - name: ingest-data
+      container:
+        image: "{{workflow.parameters.pipeline-image}}"
+        command: [python]
+        args: ["-m", "src.processor.data_ingestion"]
+        env:
+          - name: SOURCE_PATH
+            value: "{{workflow.parameters.source-path}}"
+          - name: TARGET_PATH
+            value: "{{workflow.parameters.target-path}}"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+
+    - name: quality-check
+      inputs:
+        parameters:
+          - name: layer
+      container:
+        image: "{{workflow.parameters.pipeline-image}}"
+        command: [python]
+        args: ["-m", "src.quality.quality_checker", "--layer", "{{inputs.parameters.layer}}"]
+        env:
+          - name: DATA_PATH
+            value: "{{workflow.parameters.data-path}}/{{inputs.parameters.layer}}"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+
+    - name: transform-data
+      inputs:
+        parameters:
+          - name: source-layer
+          - name: target-layer
+      container:
+        image: "{{workflow.parameters.pipeline-image}}"
+        command: [python]
+        args: 
+          - "-m"
+          - "src.processor.data_transformer"
+          - "--source-layer"
+          - "{{inputs.parameters.source-layer}}"
+          - "--target-layer"
+          - "{{inputs.parameters.target-layer}}"
+        env:
+          - name: SPARK_MASTER_URL
+            valueFrom:
+              configMapKeyRef:
+                name: pipeline-config
+                key: SPARK_MASTER_URL
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+
+    - name: publish-metrics
+      container:
+        image: "{{workflow.parameters.pipeline-image}}"
+        command: [python]
+        args: ["-m", "src.metrics.metrics_publisher"]
+        env:
+          - name: KAFKA_BOOTSTRAP_SERVERS
+            valueFrom:
+              configMapKeyRef:
+                name: pipeline-config
+                key: KAFKA_BOOTSTRAP_SERVERS
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"

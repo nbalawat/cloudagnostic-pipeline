@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workflow-notifications
+  namespace: data-pipeline
+data:
+  notification-config.yaml: |
+    email:
+      - name: pipeline-success
+        subject: "Data Pipeline Execution Success"
+        body: |
+          Pipeline execution completed successfully.
+          Workflow: {{workflow.name}}
+          Duration: {{workflow.duration}}
+          Start Time: {{workflow.startTime}}
+          End Time: {{workflow.endTime}}
+          
+          Metrics:
+          - Records Processed: {{workflow.metrics.records_processed}}
+          - Quality Score: {{workflow.metrics.quality_check_score}}
+      
+      - name: pipeline-failure
+        subject: "Data Pipeline Execution Failure"
+        body: |
+          Pipeline execution failed.
+          Workflow: {{workflow.name}}
+          Node: {{workflow.failedNode}}
+          Error: {{workflow.error}}
+          
+          Please check the logs for more details.
+    
+    slack:
+      - name: quality-alert
+        channel: "#data-quality-alerts"
+        message: |
+          :warning: Quality Check Alert
+          Layer: {{workflow.task.layer}}
+          Check Type: {{workflow.task.checkType}}
+          Score: {{workflow.task.score}}
+          Threshold: {{workflow.task.threshold}}
+      
+      - name: processing-alert
+        channel: "#pipeline-alerts"
+        message: |
+          :x: Processing Error
+          Task: {{workflow.task.name}}
+          Error: {{workflow.task.error}}
+          Impact: {{workflow.task.impact}}

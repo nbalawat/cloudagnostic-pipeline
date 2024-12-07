@@ -1,0 +1,115 @@
+source_systems:
+  finance:
+    landing_path: "/data/landing/finance"
+    schedule: "0 */4 * * *"  # Every 4 hours
+    file_patterns:
+      - "transactions_*.parquet"
+      - "accounts_*.json"
+      - "customers_*.csv"
+    bronze_config:
+      format: "delta"
+      path: "/data/bronze/finance"
+      tables:
+        transactions:
+          source_pattern: "transactions_*.parquet"
+          schema_check: true
+        accounts:
+          source_pattern: "accounts_*.json"
+          schema_check: true
+        customers:
+          source_pattern: "customers_*.csv"
+          schema_check: true
+          
+  sales:
+    landing_path: "/data/landing/sales"
+    schedule: "0 */6 * * *"  # Every 6 hours
+    file_patterns:
+      - "orders_*.parquet"
+      - "products_*.json"
+    bronze_config:
+      format: "iceberg"
+      path: "/data/bronze/sales"
+      tables:
+        orders:
+          source_pattern: "orders_*.parquet"
+          schema_check: true
+        products:
+          source_pattern: "products_*.json"
+          schema_check: true
+
+silver_layer:
+  finance_mart:
+    format: "delta"
+    path: "/data/silver/finance"
+    tables:
+      customer_accounts:
+        dependencies:
+          - "bronze.finance.customers"
+          - "bronze.finance.accounts"
+        transformation: |
+          SELECT 
+            c.customer_id,
+            c.name,
+            a.account_number,
+            a.account_type,
+            a.balance
+          FROM bronze.finance.customers c
+          JOIN bronze.finance.accounts a ON c.customer_id = a.customer_id
+      
+      daily_transactions:
+        dependencies:
+          - "bronze.finance.transactions"
+          - "bronze.finance.accounts"
+        transformation: |
+          SELECT 
+            t.transaction_id,
+            t.account_id,
+            a.account_type,
+            t.amount,
+            t.transaction_date
+          FROM bronze.finance.transactions t
+          JOIN bronze.finance.accounts a ON t.account_id = a.account_id
+
+  sales_mart:
+    format: "iceberg"
+    path: "/data/silver/sales"
+    tables:
+      order_details:
+        dependencies:
+          - "bronze.sales.orders"
+          - "bronze.sales.products"
+          - "silver.finance_mart.customer_accounts"
+        transformation: |
+          SELECT 
+            o.order_id,
+            o.customer_id,
+            ca.name as customer_name,
+            p.product_name,
+            o.quantity,
+            o.order_date
+          FROM bronze.sales.orders o
+          JOIN bronze.sales.products p ON o.product_id = p.product_id
+          JOIN silver.finance_mart.customer_accounts ca ON o.customer_id = ca.customer_id
+
+gold_layer:
+  analytics:
+    format: "delta"
+    path: "/data/gold/analytics"
+    tables:
+      customer_360:
+        dependencies:
+          - "silver.finance_mart.customer_accounts"
+          - "silver.finance_mart.daily_transactions"
+          - "silver.sales_mart.order_details"
+        transformation: |
+          SELECT 
+            ca.customer_id,
+            ca.name,
+            COUNT(DISTINCT dt.transaction_id) as total_transactions,
+            SUM(dt.amount) as total_transaction_amount,
+            COUNT(DISTINCT od.order_id) as total_orders,
+            SUM(od.quantity) as total_products_ordered
+          FROM silver.finance_mart.customer_accounts ca
+          LEFT JOIN silver.finance_mart.daily_transactions dt ON ca.account_number = dt.account_id
+          LEFT JOIN silver.sales_mart.order_details od ON ca.customer_id = od.customer_id
+          GROUP BY ca.customer_id, ca.name

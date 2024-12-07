@@ -1,0 +1,55 @@
+version: '1.0'
+mappings:
+  bronze:
+    table_a:
+      source:
+        type: csv
+        path: /data/source/table_a.csv
+      target:
+        format: delta
+        path: /data/bronze/table_a
+      quality_checks:
+        - rule: volume_check
+          params:
+            min_records: 1000
+        - rule: null_check
+          params:
+            columns: ["id", "name"]
+
+    table_b:
+      source:
+        type: json
+        path: /data/source/table_b.json
+      target:
+        format: delta
+        path: /data/bronze/table_b
+      quality_checks:
+        - rule: schema_check
+          params:
+            required_columns: ["id", "category", "value"]
+
+  silver:
+    table_c:
+      source:
+        - table: table_a
+          layer: bronze
+        - table: table_b
+          layer: bronze
+      target:
+        format: delta
+        path: /data/silver/table_c
+      transformation: |
+        SELECT 
+          a.id,
+          a.name,
+          b.category,
+          b.value
+        FROM bronze.table_a a
+        JOIN bronze.table_b b ON a.id = b.id
+      quality_checks:
+        - rule: referential_integrity
+          params:
+            key_column: id
+        - rule: business_rule
+          params:
+            condition: "value > 0"

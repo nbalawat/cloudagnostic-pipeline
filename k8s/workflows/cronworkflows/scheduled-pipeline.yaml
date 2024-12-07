@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: scheduled-data-pipeline
+  namespace: data-pipeline
+spec:
+  schedule: "0 */4 * * *"  # Run every 4 hours
+  concurrencyPolicy: Replace
+  startingDeadlineSeconds: 180
+  workflowSpec:
+    workflowTemplateRef:
+      name: data-pipeline-template
+    arguments:
+      parameters:
+        - name: pipeline-image
+          value: "your-registry/pipeline-image:latest"
+        - name: config-path
+          value: "/config/pipeline-config.yaml"
+        - name: source-path
+          value: "/data/landing"
+        - name: target-path
+          value: "/data/bronze"
+        - name: data-path
+          value: "/data"
+    volumes:
+      - name: pipeline-config
+        configMap:
+          name: pipeline-config
+      - name: pipeline-data
+        persistentVolumeClaim:
+          claimName: pipeline-data
+    volumeMounts:
+      - name: pipeline-config
+        mountPath: /config
+      - name: pipeline-data
+        mountPath: /data

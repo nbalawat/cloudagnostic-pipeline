@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: pipeline-triggers
+  namespace: data-pipeline
+spec:
+  template:
+    serviceAccountName: pipeline-sa
+  dependencies:
+    - name: data-arrival
+      eventSourceName: data-events
+      eventName: data-landing
+  triggers:
+    - template:
+        name: data-pipeline-trigger
+        k8s:
+          operation: create
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: data-pipeline-
+              spec:
+                workflowTemplateRef:
+                  name: data-pipeline-template
+                arguments:
+                  parameters:
+                    - name: pipeline-image
+                      value: "your-registry/pipeline-image:latest"
+                    - name: config-path
+                      value: "/config/pipeline-config.yaml"
+                    - name: source-path
+                      value: "{{workflow.dependencies.data-arrival.messages.0.path}}"
+                    - name: target-path
+                      value: "/data/bronze"
+                    - name: data-path
+                      value: "/data"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: EventSource
+metadata:
+  name: data-events
+  namespace: data-pipeline
+spec:
+  template:
+    serviceAccountName: pipeline-sa
+  kafka:
+    data-landing:
+      url: "{{workflow.parameters.kafka-bootstrap-servers}}"
+      topic: "data-landing-events"
+      jsonBody: true
+      consumer:
+        groupName: "pipeline-triggers"
+      tls:
+        enabled: false
+      auth:
+        enabled: false
+      filter:
+        expression: "body.eventType == 'DATA_ARRIVAL'"
