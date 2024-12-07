@@ -1,0 +1,220 @@
+---
+name: "Real-time Fraud Detection Pipeline"
+id: "fraud_detection_pipeline"
+description: "Real-time transaction fraud detection and prevention"
+version: "2.0.0"
+owner: "risk_management"
+schedule: "streaming"
+
+dependencies:
+  - pipeline_id: "customer_360_pipeline"
+    status: "active"
+    max_age_hours: 4
+  - pipeline_id: "fraud_model_training"
+    status: "completed"
+    max_age_hours: 24
+
+input:
+  sources:
+    - name: "transaction_stream"
+      type: "kafka"
+      config:
+        topic: "real-time-transactions"
+        consumer_group: "fraud-detection-group"
+        offset: "latest"
+        format: "avro"
+        schema_registry: "http://schema-registry:8081"
+        
+    - name: "customer_features"
+      type: "redis"
+      config:
+        connection_id: "feature_store"
+        key_pattern: "customer:{customer_id}:features"
+        features:
+          - "risk_score"
+          - "usual_transaction_patterns"
+          - "device_fingerprints"
+    
+    - name: "historical_fraud_cases"
+      type: "database"
+      config:
+        connection_id: "fraud_db"
+        query: |
+          SELECT 
+            transaction_pattern,
+            fraud_indicators,
+            resolution
+          FROM fraud_cases 
+          WHERE detection_date >= date_sub(current_date(), 30)
+
+transformations:
+  - name: "transaction_enrichment"
+    type: "stream"
+    config:
+      engine: "flink"
+      window:
+        type: "sliding"
+        size: "5 minutes"
+        slide: "1 minute"
+      sql: |
+        SELECT 
+          t.*,
+          c.risk_score,
+          c.usual_transaction_patterns,
+          CASE 
+            WHEN t.amount > 10 * avg_amount THEN 'HIGH'
+            WHEN t.amount > 5 * avg_amount THEN 'MEDIUM'
+            ELSE 'LOW'
+          END as amount_risk
+        FROM transaction_stream t
+        JOIN customer_features c ON t.customer_id = c.customer_id
+        WINDOW w AS (
+          PARTITION BY t.customer_id 
+          ORDER BY t.transaction_time 
+          RANGE BETWEEN INTERVAL '1' HOUR PRECEDING AND CURRENT ROW
+        )
+
+  - name: "fraud_scoring"
+    type: "ml"
+    config:
+      model_id: "real_time_fraud_detection"
+      version: "3.0"
+      features:
+        - "amount"
+        - "merchant_category"
+        - "transaction_country"
+        - "device_fingerprint"
+        - "risk_score"
+        - "amount_risk"
+        - "transaction_velocity"
+      output_columns:
+        - "fraud_probability"
+        - "fraud_indicators"
+        - "recommended_action"
+
+  - name: "rule_based_validation"
+    type: "python"
+    config:
+      module: "fraud_rules"
+      function: "apply_business_rules"
+      parameters:
+        rules:
+          velocity_check:
+            max_transactions_per_hour: 20
+            max_amount_per_hour: 10000
+          location_check:
+            enable_geofencing: true
+            suspicious_countries: ["XX", "YY", "ZZ"]
+          pattern_check:
+            unusual_time_weight: 0.3
+            unusual_location_weight: 0.3
+            unusual_amount_weight: 0.4
+
+quality_rules:
+  - rule_id: "model_performance"
+    severity: "critical"
+    config:
+      type: "metric"
+      metric: "auc_roc"
+      min_value: 0.95
+      measurement_window: "1h"
+
+  - rule_id: "false_positive_rate"
+    severity: "high"
+    config:
+      type: "ratio"
+      numerator: "false_positives"
+      denominator: "total_predictions"
+      max_value: 0.01
+      measurement_window: "1h"
+
+  - rule_id: "processing_latency"
+    severity: "critical"
+    config:
+      type: "latency"
+      max_latency_ms: 100
+      percentile: 99
+
+output:
+  destinations:
+    - name: "fraud_alerts"
+      type: "kafka"
+      config:
+        topic: "fraud-alerts"
+        key: "transaction_id"
+        headers:
+          source: "fraud_detection_pipeline"
+          version: "2.0.0"
+        partitioning:
+          strategy: "customer_id"
+          
+    - name: "fraud_cases"
+      type: "database"
+      config:
+        connection_id: "fraud_db"
+        table: "fraud_cases"
+        write_mode: "append"
+        batch_size: 1000
+        
+    - name: "blocking_rules"
+      type: "redis"
+      config:
+        connection_id: "rules_cache"
+        key_pattern: "block:{entity_id}:{rule_type}"
+        ttl_seconds: 3600
+
+monitoring:
+  metrics:
+    - name: "transactions_processed"
+      type: "counter"
+      labels:
+        - "risk_level"
+        - "action_taken"
+    
+    - name: "detection_latency"
+      type: "histogram"
+      buckets: [10, 25, 50, 100, 200]
+    
+    - name: "blocked_transactions"
+      type: "counter"
+      labels:
+        - "reason"
+        - "merchant_category"
+
+  alerts:
+    - name: "high_fraud_rate"
+      condition: "fraud_rate > 0.01"
+      severity: "critical"
+      channels:
+        - "slack"
+        - "pagerduty"
+      
+    - name: "model_degradation"
+      condition: "auc_roc < 0.95"
+      severity: "high"
+      channels:
+        - "slack"
+        - "email"
+
+error_handling:
+  retry:
+    max_attempts: 2
+    initial_delay: 1
+    max_delay: 5
+    exponential_base: 2
+  
+  failure_threshold:
+    error_rate: 0.001
+    latency_ms: 200
+  
+  dead_letter_queue:
+    topic: "fraud-detection-dlq"
+    retention_hours: 24
+  
+  notification:
+    channels:
+      - "slack"
+      - "pagerduty"
+    templates:
+      slack: "templates/slack/fraud_alert.json"
+      pagerduty: "templates/pagerduty/incident.json"

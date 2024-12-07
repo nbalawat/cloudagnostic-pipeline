@@ -1,0 +1,230 @@
+---
+name: "Customer 360 Pipeline"
+id: "customer_360_pipeline"
+description: "Comprehensive customer data integration pipeline"
+version: "1.0.0"
+owner: "data_analytics"
+schedule: "0 */4 * * *"  # Every 4 hours
+
+dependencies:
+  - pipeline_id: "customer_master_data"
+    status: "completed"
+    max_age_hours: 24
+  - pipeline_id: "transaction_history"
+    status: "completed"
+    max_age_hours: 4
+
+input:
+  sources:
+    - name: "core_banking"
+      type: "database"
+      config:
+        connection_id: "core_banking_db"
+        query: |
+          SELECT 
+            customer_id, 
+            first_name, 
+            last_name, 
+            date_of_birth,
+            address,
+            kyc_status,
+            risk_rating,
+            segment
+          FROM customers 
+          WHERE last_updated > :last_execution_time
+    
+    - name: "transactions"
+      type: "s3"
+      config:
+        bucket: "banking-data"
+        prefix: "transactions/daily"
+        pattern: "*.parquet"
+        
+    - name: "credit_cards"
+      type: "kafka"
+      config:
+        topic: "credit-card-transactions"
+        consumer_group: "customer-360-group"
+        offset: "latest"
+        format: "avro"
+        schema_registry: "http://schema-registry:8081"
+
+transformations:
+  - name: "customer_profile_enrichment"
+    type: "sql"
+    config:
+      engine: "spark"
+      query: |
+        WITH customer_transactions AS (
+          SELECT 
+            customer_id,
+            COUNT(*) as transaction_count,
+            SUM(amount) as total_spend,
+            AVG(amount) as avg_transaction_value,
+            percentile_approx(amount, 0.95) as high_value_threshold
+          FROM transactions
+          WHERE transaction_date >= date_sub(current_date(), 90)
+          GROUP BY customer_id
+        ),
+        credit_metrics AS (
+          SELECT 
+            customer_id,
+            SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE 0 END) as credit_usage,
+            MAX(credit_limit) as credit_limit,
+            AVG(payment_status) as payment_reliability
+          FROM credit_cards
+          GROUP BY customer_id
+        )
+        SELECT 
+          c.*,
+          ct.transaction_count,
+          ct.total_spend,
+          ct.avg_transaction_value,
+          ct.high_value_threshold,
+          cm.credit_usage,
+          cm.credit_limit,
+          cm.payment_reliability,
+          CASE 
+            WHEN ct.total_spend > 100000 AND cm.payment_reliability > 0.9 THEN 'PREMIUM'
+            WHEN ct.total_spend > 50000 AND cm.payment_reliability > 0.8 THEN 'GOLD'
+            ELSE 'STANDARD'
+          END as calculated_segment
+        FROM core_banking c
+        LEFT JOIN customer_transactions ct ON c.customer_id = ct.customer_id
+        LEFT JOIN credit_metrics cm ON c.customer_id = cm.customer_id
+
+  - name: "risk_profile_calculation"
+    type: "python"
+    config:
+      module: "risk_scoring"
+      function: "calculate_risk_profile"
+      parameters:
+        risk_factors:
+          transaction_pattern_weight: 0.3
+          credit_usage_weight: 0.3
+          payment_history_weight: 0.2
+          kyc_status_weight: 0.2
+        risk_thresholds:
+          high_risk: 0.7
+          medium_risk: 0.4
+
+  - name: "product_recommendations"
+    type: "ml"
+    config:
+      model_id: "customer_propensity_model"
+      version: "2.0"
+      features:
+        - "total_spend"
+        - "avg_transaction_value"
+        - "credit_usage"
+        - "payment_reliability"
+        - "calculated_segment"
+        - "risk_score"
+      output_columns:
+        - "product_recommendations"
+        - "propensity_scores"
+
+quality_rules:
+  - rule_id: "customer_completeness"
+    severity: "critical"
+    config:
+      type: "completeness"
+      threshold: 0.99
+      columns:
+        - "customer_id"
+        - "first_name"
+        - "last_name"
+        - "calculated_segment"
+        - "risk_score"
+
+  - rule_id: "risk_score_range"
+    severity: "high"
+    config:
+      type: "range"
+      column: "risk_score"
+      min: 0
+      max: 1
+      threshold: 1.0
+
+  - rule_id: "segment_distribution"
+    severity: "medium"
+    config:
+      type: "distribution"
+      column: "calculated_segment"
+      expected_ratios:
+        PREMIUM: [0.05, 0.15]
+        GOLD: [0.15, 0.35]
+        STANDARD: [0.50, 0.80]
+
+output:
+  destinations:
+    - name: "customer_360_warehouse"
+      type: "database"
+      config:
+        connection_id: "data_warehouse"
+        table: "customer_360_view"
+        write_mode: "merge"
+        merge_key: "customer_id"
+        partition_columns:
+          - "calculated_segment"
+          - "update_date"
+
+    - name: "real_time_features"
+      type: "redis"
+      config:
+        connection_id: "feature_store"
+        key_pattern: "customer:{customer_id}:features"
+        ttl_seconds: 3600
+        features:
+          - "risk_score"
+          - "calculated_segment"
+          - "product_recommendations"
+
+monitoring:
+  metrics:
+    - name: "processed_customers"
+      type: "counter"
+      labels:
+        - "calculated_segment"
+        - "risk_level"
+    
+    - name: "processing_time"
+      type: "histogram"
+      buckets: [10, 30, 60, 120, 300]
+    
+    - name: "data_freshness"
+      type: "gauge"
+      description: "Data freshness in minutes"
+
+  alerts:
+    - name: "quality_failure"
+      condition: "quality_score < 0.95"
+      severity: "critical"
+      channels:
+        - "slack"
+        - "email"
+      
+    - name: "processing_delay"
+      condition: "processing_time > 300"
+      severity: "high"
+      channels:
+        - "slack"
+
+error_handling:
+  retry:
+    max_attempts: 3
+    initial_delay: 60
+    max_delay: 300
+    exponential_base: 2
+  
+  failure_threshold:
+    quality_score: 0.9
+    error_rate: 0.05
+  
+  notification:
+    channels:
+      - "slack"
+      - "email"
+    templates:
+      slack: "templates/slack/pipeline_error.json"
+      email: "templates/email/pipeline_error.html"

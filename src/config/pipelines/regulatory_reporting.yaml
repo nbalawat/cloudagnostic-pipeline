@@ -1,0 +1,260 @@
+---
+name: "Regulatory Reporting Pipeline"
+id: "regulatory_reporting_pipeline"
+description: "Automated regulatory compliance reporting pipeline"
+version: "1.5.0"
+owner: "compliance"
+schedule: "0 2 * * *"  # Daily at 2 AM
+
+dependencies:
+  - pipeline_id: "customer_360_pipeline"
+    status: "completed"
+    max_age_hours: 24
+  - pipeline_id: "transaction_aggregation"
+    status: "completed"
+    max_age_hours: 12
+
+input:
+  sources:
+    - name: "customer_data"
+      type: "database"
+      config:
+        connection_id: "data_warehouse"
+        query: |
+          SELECT 
+            c.*,
+            r.risk_score,
+            r.risk_factors,
+            r.last_review_date
+          FROM customer_360_view c
+          JOIN risk_assessments r ON c.customer_id = r.customer_id
+          WHERE c.update_date >= :last_execution_date
+    
+    - name: "transaction_summary"
+      type: "database"
+      config:
+        connection_id: "data_warehouse"
+        query: |
+          SELECT 
+            customer_id,
+            transaction_date,
+            transaction_type,
+            currency,
+            SUM(amount) as total_amount,
+            COUNT(*) as transaction_count
+          FROM daily_transactions
+          WHERE transaction_date >= date_sub(current_date(), 90)
+          GROUP BY 
+            customer_id,
+            transaction_date,
+            transaction_type,
+            currency
+    
+    - name: "compliance_rules"
+      type: "s3"
+      config:
+        bucket: "compliance-config"
+        prefix: "rules/current"
+        pattern: "*.json"
+
+transformations:
+  - name: "suspicious_activity_report"
+    type: "sql"
+    config:
+      engine: "spark"
+      query: |
+        WITH high_value_transactions AS (
+          SELECT 
+            customer_id,
+            transaction_date,
+            currency,
+            total_amount,
+            transaction_count,
+            LAG(total_amount) OVER (
+              PARTITION BY customer_id, currency 
+              ORDER BY transaction_date
+            ) as prev_day_amount
+          FROM transaction_summary
+          WHERE total_amount >= 10000
+        )
+        SELECT 
+          c.*,
+          hvt.transaction_date,
+          hvt.currency,
+          hvt.total_amount,
+          hvt.transaction_count,
+          CASE 
+            WHEN c.risk_score >= 0.7 THEN 'HIGH'
+            WHEN c.risk_score >= 0.4 THEN 'MEDIUM'
+            ELSE 'LOW'
+          END as risk_category,
+          CASE 
+            WHEN hvt.total_amount >= 50000 THEN true
+            WHEN hvt.total_amount >= 3 * COALESCE(hvt.prev_day_amount, 0) THEN true
+            ELSE false
+          END as requires_investigation
+        FROM customer_data c
+        JOIN high_value_transactions hvt ON c.customer_id = hvt.customer_id
+
+  - name: "aml_compliance_check"
+    type: "python"
+    config:
+      module: "compliance_rules"
+      function: "evaluate_aml_compliance"
+      parameters:
+        thresholds:
+          transaction_monitoring:
+            single_transaction_limit: 50000
+            daily_aggregate_limit: 100000
+            suspicious_pattern_threshold: 0.8
+          customer_due_diligence:
+            high_risk_review_frequency_days: 90
+            medium_risk_review_frequency_days: 180
+            low_risk_review_frequency_days: 365
+
+  - name: "report_generation"
+    type: "template"
+    config:
+      template_id: "regulatory_report_template"
+      version: "2023"
+      format: "xml"
+      sections:
+        - section: "institution_info"
+          required: true
+          fields:
+            - "institution_id"
+            - "reporting_period"
+            - "submission_date"
+        - section: "suspicious_activities"
+          required: true
+          fields:
+            - "detection_date"
+            - "transaction_details"
+            - "risk_assessment"
+            - "investigation_status"
+        - section: "compliance_summary"
+          required: true
+          fields:
+            - "total_reports"
+            - "risk_distribution"
+            - "review_status"
+
+quality_rules:
+  - rule_id: "data_completeness"
+    severity: "critical"
+    config:
+      type: "completeness"
+      threshold: 1.0
+      columns:
+        - "customer_id"
+        - "risk_score"
+        - "transaction_amount"
+        - "detection_date"
+
+  - rule_id: "risk_score_validation"
+    severity: "high"
+    config:
+      type: "range"
+      column: "risk_score"
+      min: 0
+      max: 1
+      threshold: 1.0
+
+  - rule_id: "report_validation"
+    severity: "critical"
+    config:
+      type: "schema"
+      schema_id: "regulatory_report_schema"
+      version: "2023"
+      validation_level: "strict"
+
+output:
+  destinations:
+    - name: "regulatory_reports"
+      type: "s3"
+      config:
+        bucket: "regulatory-reports"
+        prefix: "submissions/{reporting_date}"
+        format: "xml"
+        encryption:
+          algorithm: "AES256"
+          kms_key_id: "arn:aws:kms:region:account:key/key-id"
+        
+    - name: "compliance_database"
+      type: "database"
+      config:
+        connection_id: "compliance_db"
+        table: "regulatory_submissions"
+        write_mode: "append"
+        batch_size: 100
+        
+    - name: "audit_log"
+      type: "kafka"
+      config:
+        topic: "compliance-audit-log"
+        key: "report_id"
+        retention_days: 365
+        compression: "gzip"
+
+monitoring:
+  metrics:
+    - name: "reports_generated"
+      type: "counter"
+      labels:
+        - "report_type"
+        - "risk_level"
+    
+    - name: "processing_time"
+      type: "histogram"
+      buckets: [60, 300, 600, 1800, 3600]
+    
+    - name: "validation_failures"
+      type: "counter"
+      labels:
+        - "rule_id"
+        - "severity"
+
+  alerts:
+    - name: "critical_validation_failure"
+      condition: "validation_failures{severity='critical'} > 0"
+      severity: "critical"
+      channels:
+        - "slack"
+        - "email"
+        - "pagerduty"
+      
+    - name: "report_generation_delay"
+      condition: "processing_time > 3600"
+      severity: "high"
+      channels:
+        - "slack"
+        - "email"
+
+error_handling:
+  retry:
+    max_attempts: 3
+    initial_delay: 300
+    max_delay: 3600
+    exponential_base: 2
+  
+  failure_threshold:
+    error_rate: 0.01
+    validation_score: 0.98
+  
+  notification:
+    channels:
+      - "slack"
+      - "email"
+      - "pagerduty"
+    templates:
+      slack: "templates/slack/compliance_alert.json"
+      email: "templates/email/compliance_report.html"
+      pagerduty: "templates/pagerduty/compliance_incident.json"
+
+archival:
+  strategy: "yearly"
+  retention_period: "7 years"
+  storage_class: "GLACIER"
+  metadata_retention:
+    database: "compliance_archive"
+    retention_period: "10 years"

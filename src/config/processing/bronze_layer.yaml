@@ -1,0 +1,124 @@
+---
+name: "Bronze Layer Processing"
+description: "Raw data ingestion and initial processing"
+version: "1.0"
+
+source_configurations:
+  - name: "customer_data"
+    type: "file"
+    format: "csv"
+    landing_zone:
+      path: "s3://landing-zone/customers/"
+      file_pattern: "customer_*.csv"
+    bronze_zone:
+      path: "s3://bronze/customers/"
+      partition_by: ["ingestion_date"]
+    schema_validation:
+      mode: "permissive"
+      schema_location: "s3://metadata/schemas/customers.json"
+    processing:
+      clean_column_names: true
+      add_metadata_columns:
+        - source_file
+        - ingestion_timestamp
+        - processing_timestamp
+      handle_duplicates: "keep_latest"
+    quality_checks:
+      - type: "row_count"
+        min_threshold: 1
+      - type: "null_check"
+        columns: ["customer_id", "email"]
+        max_nulls_percentage: 10
+
+  - name: "transaction_data"
+    type: "file"
+    format: "parquet"
+    landing_zone:
+      path: "s3://landing-zone/transactions/"
+      file_pattern: "txn_*.parquet"
+    bronze_zone:
+      path: "s3://bronze/transactions/"
+      partition_by: ["transaction_date", "region"]
+    schema_validation:
+      mode: "failfast"
+      schema_location: "s3://metadata/schemas/transactions.json"
+    processing:
+      clean_column_names: true
+      add_metadata_columns:
+        - source_file
+        - ingestion_timestamp
+        - processing_timestamp
+      handle_duplicates: "error"
+    quality_checks:
+      - type: "row_count"
+        min_threshold: 1
+      - type: "null_check"
+        columns: ["transaction_id", "amount", "transaction_date"]
+        max_nulls_percentage: 0
+
+  - name: "product_catalog"
+    type: "file"
+    format: "json"
+    landing_zone:
+      path: "s3://landing-zone/products/"
+      file_pattern: "catalog_*.json"
+    bronze_zone:
+      path: "s3://bronze/products/"
+      partition_by: ["catalog_date"]
+    schema_validation:
+      mode: "permissive"
+      schema_location: "s3://metadata/schemas/products.json"
+    processing:
+      clean_column_names: true
+      add_metadata_columns:
+        - source_file
+        - ingestion_timestamp
+        - processing_timestamp
+      handle_duplicates: "keep_latest"
+    quality_checks:
+      - type: "row_count"
+        min_threshold: 1
+      - type: "null_check"
+        columns: ["product_id", "product_name"]
+        max_nulls_percentage: 5
+
+processing_defaults:
+  timestamp_columns:
+    timezone: "UTC"
+    format: "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+  string_columns:
+    trim_whitespace: true
+    replace_nulls_with: ""
+  numeric_columns:
+    replace_nulls_with: 0
+  date_columns:
+    format: "yyyy-MM-dd"
+    replace_nulls_with: "1900-01-01"
+
+error_handling:
+  on_schema_mismatch: "quarantine"
+  on_quality_check_failure: "quarantine"
+  quarantine_location: "s3://quarantine/{dataset_name}/{error_type}/"
+  error_reporting:
+    format: "json"
+    location: "s3://logs/bronze_processing/"
+
+monitoring:
+  metrics:
+    - name: "files_processed"
+      type: "counter"
+      labels: ["dataset_name", "status"]
+    - name: "processing_time"
+      type: "histogram"
+      labels: ["dataset_name"]
+    - name: "quality_check_failures"
+      type: "counter"
+      labels: ["dataset_name", "check_type"]
+
+notifications:
+  on_failure:
+    - channel: "slack"
+      severity: "error"
+  on_quality_check_failure:
+    - channel: "email"
+      severity: "warning"
