@@ -1,0 +1,171 @@
+---
+# Customer Data Quality Rules
+name: "Customer Data Quality Suite"
+description: "Data quality rules for customer information and KYC compliance"
+domain: "banking"
+category: "customer_data"
+version: "1.0.0"
+
+rules:
+  - id: "customer_identity"
+    name: "Customer Identity Validation"
+    description: "Validates customer identification information"
+    type: "complex_validation"
+    severity: "critical"
+    config:
+      validations:
+        - field: "ssn"
+          pattern: "^\\d{3}-\\d{2}-\\d{4}$"
+          encryption_required: true
+        - field: "date_of_birth"
+          type: "date"
+          min_age: 18
+          max_age: 120
+        - field: "tax_id"
+          pattern: "^\\d{2}-\\d{7}$"
+          conditional: "customer_type = 'business'"
+    metadata:
+      regulatory_requirement: "KYC"
+      pii: true
+
+  - id: "address_verification"
+    name: "Customer Address Verification"
+    description: "Validates and standardizes customer addresses"
+    type: "address_validation"
+    severity: "high"
+    config:
+      required_fields:
+        - "street_address"
+        - "city"
+        - "state"
+        - "postal_code"
+      address_verification_service: "smarty_streets"
+      standardization: true
+      geocoding: true
+      threshold: 0.95
+
+  - id: "customer_risk_profile"
+    name: "Customer Risk Profile Validation"
+    description: "Validates customer risk assessment data"
+    type: "risk_validation"
+    severity: "high"
+    config:
+      risk_factors:
+        - name: "occupation_risk"
+          categories:
+            high_risk: ["money_service_business", "casino", "cryptocurrency"]
+            medium_risk: ["real_estate", "jewelry", "import_export"]
+        - name: "country_risk"
+          reference_list: "FATF_high_risk_countries"
+        - name: "transaction_risk"
+          thresholds:
+            monthly_volume: 100000
+            international_frequency: 10
+      scoring:
+        max_score: 100
+        risk_levels:
+          high: ">= 75"
+          medium: "50-74"
+          low: "< 50"
+
+  - id: "customer_duplicates"
+    name: "Customer Duplicate Detection"
+    description: "Identifies potential duplicate customer records"
+    type: "duplicate_detection"
+    severity: "medium"
+    config:
+      match_rules:
+        - fields: ["first_name", "last_name", "date_of_birth"]
+          method: "fuzzy_match"
+          threshold: 0.9
+        - fields: ["email", "phone_number"]
+          method: "exact_match"
+      deduplication:
+        strategy: "most_recent"
+        merge_fields: ["address", "phone_number", "email"]
+
+data_enrichment:
+  - id: "customer_segmentation"
+    name: "Customer Segmentation Enrichment"
+    type: "classification"
+    config:
+      segments:
+        - name: "premium"
+          criteria: "average_balance >= 100000 OR total_investments >= 500000"
+        - name: "standard"
+          criteria: "average_balance >= 10000 OR total_investments >= 50000"
+        - name: "basic"
+          criteria: "default"
+      update_frequency: "monthly"
+
+  - id: "customer_lifetime_value"
+    name: "Customer Lifetime Value Calculation"
+    type: "derived_metric"
+    config:
+      formula: "sum(transaction_revenue) + sum(investment_revenue) - sum(service_costs)"
+      time_window: "rolling_12_months"
+      update_frequency: "daily"
+
+monitoring:
+  - id: "customer_data_freshness"
+    name: "Customer Data Freshness Monitor"
+    type: "freshness_check"
+    config:
+      max_age:
+        contact_info: "365d"
+        kyc_documents: "730d"
+        risk_assessment: "90d"
+      alert_threshold: "30d"
+
+  - id: "customer_data_consistency"
+    name: "Cross-System Customer Data Consistency"
+    type: "consistency_check"
+    config:
+      systems:
+        - name: "core_banking"
+          key_field: "customer_id"
+        - name: "crm"
+          key_field: "crm_customer_id"
+        - name: "investment_platform"
+          key_field: "investor_id"
+      match_fields:
+        - "name"
+        - "address"
+        - "phone_number"
+        - "email"
+      threshold: 0.99
+
+compliance:
+  - id: "gdpr_compliance"
+    name: "GDPR Data Protection Rules"
+    type: "compliance_check"
+    config:
+      data_retention:
+        default_period: "7y"
+        exceptions:
+          regulatory_records: "10y"
+      data_protection:
+        encryption_required:
+          - "ssn"
+          - "tax_id"
+          - "account_numbers"
+        masking_required:
+          - "date_of_birth"
+          - "address"
+      consent_tracking:
+        required: true
+        verification_frequency: "annual"
+
+reporting:
+  - name: "customer_data_quality_report"
+    frequency: "daily"
+    metrics:
+      - "completeness_score"
+      - "accuracy_score"
+      - "duplicate_rate"
+      - "risk_profile_coverage"
+    distribution:
+      - type: "email"
+        recipients: ["data-quality@bank.com"]
+      - type: "dashboard"
+        refresh_rate: "hourly"

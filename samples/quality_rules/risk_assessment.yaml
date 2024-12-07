@@ -1,0 +1,208 @@
+---
+# Risk Assessment Quality Rules
+name: "Risk Assessment Quality Suite"
+description: "Data quality rules for risk assessment and management"
+domain: "banking"
+category: "risk_assessment"
+version: "1.0.0"
+
+rules:
+  - id: "credit_risk_validation"
+    name: "Credit Risk Data Validation"
+    description: "Validates credit risk assessment data"
+    type: "risk_validation"
+    severity: "critical"
+    config:
+      scoring_components:
+        - name: "payment_history"
+          weight: 0.35
+          validations:
+            - field: "days_past_due"
+              type: "range"
+              min: 0
+              max: 180
+            - field: "default_events"
+              type: "count"
+              period: "24m"
+        - name: "credit_utilization"
+          weight: 0.30
+          validations:
+            - field: "utilization_ratio"
+              type: "range"
+              min: 0
+              max: 1
+        - name: "credit_history_length"
+          weight: 0.15
+          validations:
+            - field: "account_age"
+              type: "range"
+              min: "0m"
+              max: "600m"
+      threshold_rules:
+        - name: "high_risk"
+          condition: "score <= 580"
+          actions: ["flag_for_review", "increase_monitoring"]
+        - name: "medium_risk"
+          condition: "score > 580 AND score <= 670"
+          actions: ["standard_monitoring"]
+        - name: "low_risk"
+          condition: "score > 670"
+          actions: ["reduced_monitoring"]
+
+  - id: "market_risk_monitoring"
+    name: "Market Risk Data Quality"
+    description: "Ensures quality of market risk data"
+    type: "market_risk"
+    severity: "high"
+    config:
+      var_calculations:
+        confidence_level: 0.99
+        time_horizon: "10d"
+        lookback_period: "252d"
+      data_requirements:
+        - metric: "price_data"
+          frequency: "daily"
+          max_missing: "5%"
+        - metric: "volatility"
+          frequency: "daily"
+          calculation_method: "exponential_weighted"
+      stress_testing:
+        scenarios:
+          - name: "severe_market_decline"
+            parameters:
+              equity_decline: -0.40
+              interest_rate_change: 0.03
+              fx_volatility: 0.25
+          - name: "liquidity_crisis"
+            parameters:
+              spread_widening: 0.05
+              trading_volume_decline: -0.60
+
+  - id: "operational_risk"
+    name: "Operational Risk Assessment"
+    description: "Validates operational risk data"
+    type: "operational_risk"
+    severity: "high"
+    config:
+      risk_categories:
+        - name: "process_risk"
+          metrics:
+            - "error_rate"
+            - "processing_time"
+            - "system_availability"
+        - name: "people_risk"
+          metrics:
+            - "staff_turnover"
+            - "training_completion"
+            - "authorization_violations"
+        - name: "system_risk"
+          metrics:
+            - "system_uptime"
+            - "response_time"
+            - "security_incidents"
+      thresholds:
+        error_rate: 0.001
+        system_availability: 0.999
+        security_incidents: 0
+
+monitoring:
+  - id: "risk_data_quality"
+    name: "Risk Data Quality Monitoring"
+    type: "quality_monitor"
+    config:
+      metrics:
+        - name: "data_completeness"
+          threshold: 0.99
+          critical_threshold: 0.95
+        - name: "data_timeliness"
+          max_delay: "1d"
+          critical_delay: "2d"
+        - name: "data_accuracy"
+          confidence_level: 0.95
+      frequency: "hourly"
+
+anomaly_detection:
+  - id: "risk_anomaly"
+    name: "Risk Metrics Anomaly Detection"
+    type: "statistical"
+    config:
+      methods:
+        - name: "zscore"
+          parameters:
+            window_size: "30d"
+            threshold: 3.0
+        - name: "isolation_forest"
+          parameters:
+            contamination: 0.01
+            features:
+              - "var_change"
+              - "position_delta"
+              - "exposure_change"
+
+reporting:
+  - id: "risk_reporting"
+    name: "Risk Assessment Reporting"
+    type: "automated_report"
+    config:
+      reports:
+        - name: "daily_risk_summary"
+          content:
+            - "var_metrics"
+            - "limit_breaches"
+            - "anomaly_alerts"
+          schedule: "daily"
+        - name: "monthly_risk_review"
+          content:
+            - "risk_trends"
+            - "stress_test_results"
+            - "control_effectiveness"
+          schedule: "monthly"
+      distribution:
+        - role: "risk_manager"
+          formats: ["pdf", "excel"]
+        - role: "board_member"
+          formats: ["pdf"]
+
+limits_monitoring:
+  - id: "risk_limits"
+    name: "Risk Limits Monitoring"
+    type: "limit_check"
+    config:
+      limits:
+        - name: "position_limit"
+          type: "absolute"
+          value: 1000000
+          currency: "USD"
+        - name: "var_limit"
+          type: "percentage"
+          value: 0.02
+          basis: "capital"
+      actions:
+        soft_breach:
+          - "notify_risk_manager"
+          - "increase_monitoring"
+        hard_breach:
+          - "freeze_trading"
+          - "notify_management"
+          - "require_approval"
+
+stress_testing:
+  - id: "stress_scenarios"
+    name: "Stress Testing Framework"
+    type: "scenario_analysis"
+    config:
+      scenarios:
+        - name: "market_crash"
+          parameters:
+            equity_decline: -0.50
+            interest_rate_spike: 0.05
+            credit_spread_widening: 0.03
+        - name: "liquidity_crisis"
+          parameters:
+            funding_cost_increase: 0.04
+            asset_liquidation_haircut: 0.30
+      frequency: "quarterly"
+      validation:
+        - "model_backtesting"
+        - "scenario_plausibility"
+        - "impact_assessment"
